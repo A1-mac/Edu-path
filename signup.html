@@ -1,11 +1,67 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
-</head>
-<body>
-    
-</body>
-</html>
+<?php
+require 'db.php';
+
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $name = $_POST['name'];
+    $email = $_POST['email'];
+    $password = password_hash($_POST['password'], PASSWORD_DEFAULT); // Secure password
+
+    // Handling file upload
+    if (isset($_FILES['transcript']) && $_FILES['transcript']['error'] == 0) {
+        $uploadDir = 'uploads/';
+        $fileName = basename($_FILES['transcript']['name']);
+        $targetFilePath = $uploadDir . $fileName;
+
+        // Ensure the uploads directory exists
+        if (!is_dir($uploadDir)) {
+            mkdir($uploadDir, 0777, true);
+        }
+
+        // Validate file type (PDF only)
+        $fileType = pathinfo($targetFilePath, PATHINFO_EXTENSION);
+        if ($fileType !== 'pdf') {
+            echo "Error: Only PDF files are allowed.";
+            exit;
+        }
+
+        // Move uploaded file to the server
+        if (move_uploaded_file($_FILES['transcript']['tmp_name'], $targetFilePath)) {
+            echo "Transcript uploaded successfully!";
+        } else {
+            echo "Error: Unable to upload the file.";
+            exit;
+        }
+
+        // Simulate calling a Python script to process the PDF
+        $output = shell_exec("python3 process_transcript.py " . escapeshellarg($targetFilePath));
+        $extractedData = json_decode($output, true);
+
+        if ($extractedData) {
+            $subjects = implode(',', $extractedData['subjects']);
+            $meritPoints = $extractedData['merit_points'];
+
+            try {
+                // Insert user data into the database
+                $stmt = $pdo->prepare("INSERT INTO users (name, email, password, subjects, merit_points) VALUES (?, ?, ?, ?, ?)");
+                $stmt->execute([$name, $email, $password, $subjects, $meritPoints]);
+                echo "Registration successful! Data processed from the transcript.";
+            } catch (PDOException $e) {
+                echo "Error: " . $e->getMessage();
+            }
+        } else {
+            echo "Error: Failed to extract data from the transcript.";
+        }
+    } else {
+        echo "Error: Please upload a valid transcript.";
+    }
+}
+?>
+<!-- HTML Form -->
+<form method="POST" action="register.php" enctype="multipart/form-data">
+    <input type="text" name="name" placeholder="Full Name" required>
+    <input type="email" name="email" placeholder="Email" required>
+    <input type="password" name="password" placeholder="Password" required>
+    <label>Upload Transcript (PDF only):</label>
+    <input type="file" name="transcript" accept=".pdf" required>
+    <button type="submit">Register</button>
+</form>
